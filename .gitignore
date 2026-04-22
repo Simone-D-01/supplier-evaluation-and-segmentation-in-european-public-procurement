@@ -1,0 +1,66 @@
+# R / RStudio
+.Rhistory
+.RData
+.Ruserdata
+*.Rproj.user
+
+# Dependency management
+renv/library/
+renv/staging/
+.packrat/
+
+# OS / editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Raw data
+data/raw/*
+!data/raw/tedcan/
+data/raw/tedcan/*
+!data/raw/tedcan/.gitkeep
+!data/raw/README.md
+
+# Processed data
+data/processed/*
+!data/processed/.gitkeep
+!data/processed/README.md
+
+# Logs
+logs/*
+!logs/.gitkeep
+!logs/README.md
+
+# Output root
+output/*
+!output/.gitkeep
+!output/README.md
+!output/figures/
+!output/tables/
+
+# Output subfolders
+output/figures/*
+output/tables/*
+!output/figures/.gitkeep
+!output/tables/.gitkeep
+!output/figures/README.md
+!output/tables/README.md
+
+# Optional: if later you want to publish selected outputs, unignore them explicitly
+#!output/figures/correlation_matrix.png
+#!output/figures/clustering_elbow.png
+#!output/figures/clustering_silhouette.png
+#!output/tables/regression_main.csv
+#!output/tables/cluster_summary.csv
+
+# Archives / temp files
+*.zip
+*.7z
+*.gz
+*.tar
+*.rar
+*.tmp
+*.temp
+*.bak
+*.swp
