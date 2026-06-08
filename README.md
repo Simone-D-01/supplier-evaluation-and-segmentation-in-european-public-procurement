@@ -13,6 +13,9 @@ The empirical analysis focuses on TED Contract Award Notice (CAN) data and addre
 
 ## Repository structure
 
+Repository structure
+
+```text
 .
 ├── .here
 ├── README.md
@@ -42,6 +45,7 @@ The empirical analysis focuses on TED Contract Award Notice (CAN) data and addre
     └── tables/
         ├── .gitkeep
         └── README.md
+```
 
 ## Workflow overview
 
