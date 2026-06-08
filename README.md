@@ -13,25 +13,35 @@ The empirical analysis focuses on TED Contract Award Notice (CAN) data and addre
 
 ## Repository structure
 
-```text
 .
+├── .here
 ├── README.md
+├── thesis-ted-repro.Rproj
 ├── R/
-│   ├── 01_download.R
-│   ├── 02_cleaning.R
-│   ├── 03_panel_build.R
-│   ├── 04_regression.R
-│   ├── 05_clustering.R
+│   ├── 01download.R
+│   ├── 02cleaning.R
+│   ├── 03panelbuild.R
+│   ├── 04regression.R
+│   ├── 05clustering.R
 │   └── README.md
 ├── data/
 │   ├── raw/
+│   │   └── tedcan/
+│   │       ├── .gitkeep
+│   │       └── README.md
 │   └── processed/
+│       └── README.md
 ├── logs/
-├── output/
-│   ├── figures/
-│   └── tables/
-└── docs/
-```
+│   ├── .gitkeep
+│   └── README.md
+└── output/
+    ├── README.md
+    ├── figures/
+    │   ├── .gitkeep
+    │   └── README.md
+    └── tables/
+        ├── .gitkeep
+        └── README.md
 
 ## Workflow overview
 
