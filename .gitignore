@@ -3,6 +3,7 @@
 .RData
 .Ruserdata
 *.Rproj.user
+.RDataTmp
 
 # Dependency management
 renv/library/
