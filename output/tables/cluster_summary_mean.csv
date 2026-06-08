@@ -1,0 +1,6 @@
+cluster,n_suppliers,avg_awards_per_year,avg_contract_value,avg_buyer_countries,avg_cross_border,avg_hhi_cpv,avg_years_active,pct_consortium
+1,96863,5.9,377444769,1.01,0.041,0.86,3.66,2.5
+2,66053,1.49,61,1,0.145,0.998,1.13,11.4
+3,2934,24.39,193864597,1.85,0.407,0.804,3.26,0.4
+4,563853,1.45,350422361,1,0.002,1,1.23,0
+5,175509,1.28,31971000,1,0.999,1,1.08,88.4

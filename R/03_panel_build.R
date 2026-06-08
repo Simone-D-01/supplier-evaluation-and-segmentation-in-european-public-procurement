@@ -9,7 +9,10 @@ options(stringsAsFactors = FALSE, scipen = 999)
 # -----------------------------------------------------------
 # 1) Package management
 # -----------------------------------------------------------
-required_pkgs <- c("here", "data.table", "dplyr", "stringr", "readr", "fs", "tibble")
+required_pkgs <- c(
+  "here", "data.table", "dplyr", "stringr", "readr",
+  "fs", "tibble", "countrycode"
+)
 
 missing_pkgs <- required_pkgs[
   !vapply(required_pkgs, requireNamespace, logical(1), quietly = TRUE)
@@ -29,7 +32,7 @@ message("Project root: ", root_dir)
 
 input_file <- here::here("data", "processed", "ted_awards_clean.csv")
 output_dir <- here::here("data", "processed")
-log_dir    <- here::here("logs")
+log_dir <- here::here("logs")
 
 fs::dir_create(output_dir)
 fs::dir_create(log_dir)
@@ -145,6 +148,26 @@ awards <- awards %>%
       stringr::str_squish(stringr::str_to_upper(as.character(WIN_COUNTRY_CODE))), ""
     ),
     WIN_COUNTRY_CODE_PARSED = parse_supplier_country(WIN_COUNTRY_CODE_RAW),
+    WIN_COUNTRY_CODE_LOOKUP = dplyr::case_when(
+      WIN_COUNTRY_CODE_PARSED == "UK" ~ "GB",
+      TRUE ~ WIN_COUNTRY_CODE_PARSED
+    ),
+    WIN_COUNTRY_ISO_NAME = countrycode::countrycode(
+      WIN_COUNTRY_CODE_LOOKUP,
+      origin = "iso2c",
+      destination = "country.name"
+    ),
+    win_country_status = dplyr::case_when(
+      is.na(WIN_COUNTRY_CODE_RAW) ~ "missing_blank",
+      is.na(WIN_COUNTRY_CODE_PARSED) ~ "invalid_unresolved",
+      WIN_COUNTRY_CODE_PARSED == "UK" ~ "accepted_special_case",
+      !is.na(WIN_COUNTRY_ISO_NAME) ~ "accepted_iso2",
+      TRUE ~ "invalid_unresolved"
+    ),
+    WIN_COUNTRY_CODE_ANALYSIS = dplyr::case_when(
+      win_country_status %in% c("accepted_iso2", "accepted_special_case") ~ WIN_COUNTRY_CODE_PARSED,
+      TRUE ~ NA_character_
+    ),
     CAE_NAME = dplyr::na_if(stringr::str_squish(as.character(CAE_NAME)), ""),
     CPV_2digit = dplyr::na_if(stringr::str_squish(as.character(CPV_2digit)), ""),
     TOP_TYPE = dplyr::na_if(
@@ -154,11 +177,13 @@ awards <- awards %>%
       stringr::str_squish(stringr::str_to_upper(as.character(CRIT_CODE))), ""
     ),
     cross_border = dplyr::if_else(
-      !is.na(WIN_COUNTRY_CODE_PARSED) & !is.na(ISO_COUNTRY_CODE),
-      as.integer(WIN_COUNTRY_CODE_PARSED != ISO_COUNTRY_CODE),
+      !is.na(WIN_COUNTRY_CODE_ANALYSIS) & !is.na(ISO_COUNTRY_CODE),
+      as.integer(WIN_COUNTRY_CODE_ANALYSIS != ISO_COUNTRY_CODE),
       NA_integer_
     ),
-    is_consortium = as.integer(stringr::str_detect(WIN_NAME_CLEAN, stringr::fixed("---")))
+    is_consortium = as.integer(
+      stringr::str_detect(WIN_NAME_CLEAN, stringr::fixed("---"))
+    )
   ) %>%
   dplyr::filter(
     !is.na(WIN_NAME_CLEAN) & WIN_NAME_CLEAN != "",
@@ -184,15 +209,55 @@ message(
 )
 
 message(
-  "Rows with non-unique / non-parsable supplier-country strings set to NA: ",
-  sum(
-    !is.na(awards$WIN_COUNTRY_CODE_RAW) & is.na(awards$WIN_COUNTRY_CODE_PARSED),
-    na.rm = TRUE
-  )
+  "Rows with accepted ISO alpha-2 supplier-country codes: ",
+  sum(awards$win_country_status == "accepted_iso2", na.rm = TRUE)
+)
+
+message(
+  "Rows with accepted special-case supplier-country codes (UK): ",
+  sum(awards$win_country_status == "accepted_special_case", na.rm = TRUE)
+)
+
+message(
+  "Rows with invalid / unresolved supplier-country codes set to NA for analysis: ",
+  sum(awards$win_country_status == "invalid_unresolved", na.rm = TRUE)
+)
+
+message(
+  "Rows with missing blank supplier-country codes: ",
+  sum(awards$win_country_status == "missing_blank", na.rm = TRUE)
 )
 
 # -----------------------------------------------------------
-# 6) CRIT_CODE validation output
+# 6) Supplier-country validation output
+# -----------------------------------------------------------
+message("Building WIN_COUNTRY_CODE validation tables ...")
+
+win_country_validation <- awards %>%
+  dplyr::count(
+    WIN_COUNTRY_CODE_RAW,
+    WIN_COUNTRY_CODE_PARSED,
+    WIN_COUNTRY_CODE_ANALYSIS,
+    win_country_status,
+    sort = TRUE,
+    name = "n_rows"
+  )
+
+win_country_validation_summary <- awards %>%
+  dplyr::count(win_country_status, sort = TRUE, name = "n_rows") %>%
+  dplyr::mutate(share = n_rows / sum(n_rows))
+
+win_country_validation_file <- here::here("logs", "win_country_code_validation.csv")
+win_country_validation_summary_file <- here::here("logs", "win_country_code_validation_summary.csv")
+
+readr::write_csv(win_country_validation, win_country_validation_file)
+readr::write_csv(win_country_validation_summary, win_country_validation_summary_file)
+
+message("WIN_COUNTRY_CODE validation saved to: ", win_country_validation_file)
+message("WIN_COUNTRY_CODE validation summary saved to: ", win_country_validation_summary_file)
+
+# -----------------------------------------------------------
+# 7) CRIT_CODE validation output
 # -----------------------------------------------------------
 message("Building CRIT_CODE validation table ...")
 
@@ -219,14 +284,14 @@ message(
 )
 
 # -----------------------------------------------------------
-# 7) Supplier-year aggregation
+# 8) Supplier-year aggregation
 # -----------------------------------------------------------
 message("Aggregating to supplier-year level ...")
 
 panel <- awards %>%
   dplyr::group_by(WIN_NAME_CLEAN, award_year) %>%
   dplyr::summarise(
-    WIN_COUNTRY_CODE = mode_non_missing(WIN_COUNTRY_CODE_PARSED),
+    WIN_COUNTRY_CODE = mode_non_missing(WIN_COUNTRY_CODE_ANALYSIS),
     
     awards_count = dplyr::n(),
     total_award_value = safe_sum(award_value),
@@ -273,12 +338,12 @@ panel <- awards %>%
     is_consortium = dplyr::if_else(any(is_consortium == 1, na.rm = TRUE), 1L, 0L),
     
     n_missing_value = sum(is.na(award_value)),
-    n_missing_win_country = sum(is.na(WIN_COUNTRY_CODE_PARSED)),
+    n_missing_win_country = sum(is.na(WIN_COUNTRY_CODE_ANALYSIS)),
     n_missing_crit_code = sum(is.na(CRIT_CODE)),
     n_unexpected_crit_code = sum(!is.na(CRIT_CODE) & !(CRIT_CODE %in% c("L", "M"))),
     
     supplier_country_conflict = dplyr::if_else(
-      dplyr::n_distinct(WIN_COUNTRY_CODE_PARSED, na.rm = TRUE) > 1, 1L, 0L
+      dplyr::n_distinct(WIN_COUNTRY_CODE_ANALYSIS, na.rm = TRUE) > 1, 1L, 0L
     ),
     
     .groups = "drop"
@@ -292,7 +357,7 @@ message(
 )
 
 # -----------------------------------------------------------
-# 8) Longitudinal variables
+# 9) Longitudinal variables
 # -----------------------------------------------------------
 panel <- panel %>%
   dplyr::group_by(WIN_NAME_CLEAN) %>%
@@ -306,7 +371,7 @@ panel <- panel %>%
   dplyr::ungroup()
 
 # -----------------------------------------------------------
-# 9) Log transformations
+# 10) Log transformations
 # -----------------------------------------------------------
 panel <- panel %>%
   dplyr::mutate(
@@ -316,7 +381,7 @@ panel <- panel %>%
   )
 
 # -----------------------------------------------------------
-# 10) Save panel output
+# 11) Save panel output
 # -----------------------------------------------------------
 output_file <- here::here("data", "processed", "supplier_year_panel.csv")
 readr::write_csv(panel, output_file)
@@ -324,7 +389,7 @@ readr::write_csv(panel, output_file)
 message("Saved supplier-year panel to: ", output_file)
 
 # -----------------------------------------------------------
-# 11) Save panel log
+# 12) Save panel log
 # -----------------------------------------------------------
 panel_log <- tibble::tibble(
   metric = c(
@@ -340,7 +405,11 @@ panel_log <- tibble::tibble(
     "missing_win_country_code",
     "missing_price_criteria_share",
     "rows_with_supplier_country_conflict",
-    "rows_with_unexpected_crit_code"
+    "rows_with_unexpected_crit_code",
+    "award_rows_win_country_missing_blank",
+    "award_rows_win_country_accepted_iso2",
+    "award_rows_win_country_accepted_special_case",
+    "award_rows_win_country_invalid_unresolved"
   ),
   value = c(
     nrow(panel),
@@ -355,7 +424,11 @@ panel_log <- tibble::tibble(
     sum(is.na(panel$WIN_COUNTRY_CODE)),
     sum(is.na(panel$price_criteria_share)),
     sum(panel$supplier_country_conflict == 1, na.rm = TRUE),
-    sum(panel$n_unexpected_crit_code > 0, na.rm = TRUE)
+    sum(panel$n_unexpected_crit_code > 0, na.rm = TRUE),
+    sum(awards$win_country_status == "missing_blank", na.rm = TRUE),
+    sum(awards$win_country_status == "accepted_iso2", na.rm = TRUE),
+    sum(awards$win_country_status == "accepted_special_case", na.rm = TRUE),
+    sum(awards$win_country_status == "invalid_unresolved", na.rm = TRUE)
   )
 )
 

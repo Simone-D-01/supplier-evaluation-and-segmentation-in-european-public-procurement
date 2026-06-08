@@ -15,44 +15,57 @@ Thumbs.db
 .vscode/
 .idea/
 
-# Raw data
+# Keep R folder structure, but do not track script outputs or temp files
+R/*
+!R/.gitkeep
+!R/README.md
+!R/*.R
+
+# Raw data (keep private)
 data/raw/*
+!data/raw/.gitkeep
+!data/raw/README.md
 !data/raw/tedcan/
+
+# Raw TED CAN files: keep the folder, ignore the annual CSVs
 data/raw/tedcan/*
 !data/raw/tedcan/.gitkeep
-!data/raw/README.md
+!data/raw/tedcan/README.md
 
-# Processed data
+# Intermediate processed data (keep private)
 data/processed/*
 !data/processed/.gitkeep
 !data/processed/README.md
 
-# Logs
+# Documentation and thesis drafts (keep private)
+docs/*
+!docs/.gitkeep
+!docs/README.md
+
+# Logs (publish)
 logs/*
 !logs/.gitkeep
 !logs/README.md
+!logs/*.csv
 
-# Output root
+# Output root: keep the folder structure
 output/*
 !output/.gitkeep
 !output/README.md
 !output/figures/
 !output/tables/
 
-# Output subfolders
+# Figures
 output/figures/*
-output/tables/*
 !output/figures/.gitkeep
-!output/tables/.gitkeep
 !output/figures/README.md
-!output/tables/README.md
+!output/figures/*.png
 
-# Optional: if later you want to publish selected outputs, unignore them explicitly
-#!output/figures/correlation_matrix.png
-#!output/figures/clustering_elbow.png
-#!output/figures/clustering_silhouette.png
-#!output/tables/regression_main.csv
-#!output/tables/cluster_summary.csv
+# Tables
+output/tables/*
+!output/tables/.gitkeep
+!output/tables/README.md
+!output/tables/*.csv
 
 # Archives / temp files
 *.zip

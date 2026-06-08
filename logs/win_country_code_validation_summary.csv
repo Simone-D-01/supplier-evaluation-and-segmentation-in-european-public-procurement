@@ -1,0 +1,5 @@
+win_country_status,n_rows,share
+accepted_iso2,3916651,0.9642287747368753
+accepted_special_case,126397,0.03111730517741224
+invalid_unresolved,10921,0.0026886088264952415
+missing_blank,7983,0.001965311259217243

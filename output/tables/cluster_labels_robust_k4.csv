@@ -1,0 +1,5 @@
+cluster_id,n_suppliers,median_awards_per_year,median_contract_value,median_buyer_countries,median_cross_border,median_hhi_cpv,median_years_active,pct_consortium,provisional_label,interpretation_note
+1,78681,3.2,260248.74,1,0,0.81,4,2.1,higher-volume diversified suppliers,More active suppliers with lower sector concentration.
+2,147537,1,370000,1,0,1,1,100,local mono-sector suppliers,Primarily domestic and highly concentrated by sector.
+3,588469,1,191711.18,1,0,1,1,0,local mono-sector suppliers,Primarily domestic and highly concentrated by sector.
+4,22898,1,403497.06,1,1,1,1,2.8,cross-border suppliers,Interpret together with centroids and summary tables.
