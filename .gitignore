@@ -3,7 +3,7 @@
 .RData
 .Ruserdata
 *.Rproj.user
-.RDataTmp
+.RDataTmp*
 
 # Dependency management
 renv/library/
@@ -79,7 +79,6 @@ output/tables/*
 *.bak
 *.swp
 .positai
-.RDataTmp1
 .RData
 .Rhistory
 .Rproj.user/
