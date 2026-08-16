@@ -79,3 +79,7 @@ output/tables/*
 *.bak
 *.swp
 .positai
+.RDataTmp1
+.RData
+.Rhistory
+.Rproj.user/
