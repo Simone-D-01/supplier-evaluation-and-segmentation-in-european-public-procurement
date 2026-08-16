@@ -13,7 +13,7 @@ The files here are the final figures and tables used to summarize the main resul
 
 The outputs in this folder are produced by the later stages of the workflow:
 
-- `R/04_regression.R` creates descriptive statistics, the correlation matrix, regression tables, and the correlation figure.
+- `R/04_regression.R` creates descriptive statistics, the correlation matrix, regression tables, the correlation figure, the consortium collinearity diagnostic and the specialization-share/HHI collinearity check.
 - `R/05_clustering.R` creates the clustering diagnostics, cluster summaries, centroid tables, and cluster figures.
 
 The underlying raw and processed data are stored in `data/raw/` and `data/processed/`.
@@ -26,6 +26,7 @@ The outputs include:
 
 - correlation matrix figure and table;
 - regression result tables;
+- specification diagnostic tables;
 - elbow and silhouette diagnostics;
 - cluster summary tables;
 - cluster centroid tables;

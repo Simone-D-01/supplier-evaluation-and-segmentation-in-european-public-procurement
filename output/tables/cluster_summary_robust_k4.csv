@@ -1,5 +1,5 @@
 cluster_id,n_suppliers,median_awards_per_year,median_contract_value,median_buyer_countries,median_cross_border,median_hhi_cpv,median_years_active,pct_consortium
-1,78681,3.2,260248.74,1,0,0.81,4,2.1
-2,147537,1,370000,1,0,1,1,100
-3,588469,1,191711.18,1,0,1,1,0
-4,22898,1,403497.06,1,1,1,1,2.8
+1,73775,3,187933.71,1,0,1,4,2.4
+2,591326,1,190752.33,1,0,1,1,0
+3,147382,1,370236.8,1,0,1,1,100
+4,22954,1,399991.69,1,1,1,1,2.8

@@ -1,6 +1,6 @@
-cluster_id,n_suppliers,avg_awards_per_year,avg_contract_value,avg_buyer_countries,avg_cross_border,avg_hhi_cpv,avg_years_active,pct_consortium
-1,587036,1.41,360767597.96,1,0,1,1.29,0
-2,3251,5.92,167321885.61,1.98,0.405,0.777,3.35,0.1
-3,21201,1.33,56913222.16,1.01,0.964,0.993,1.32,3
-4,147487,1.28,28297610.96,1,0,1,1.09,100
-5,78610,7.44,316512390.85,1.01,0.004,0.8,3.64,2.1
+cluster_id,n_suppliers,avg_awards_per_year,avg_contract_value_weighted,avg_buyer_countries_weighted,avg_cross_border_weighted,avg_hhi_cpv_weighted,avg_years_active,pct_consortium
+1,81215,7.09,154304016.36,1.01,0.004,0.954,3.62,3.1
+2,557059,1.29,359169571.39,1,0,0.999,1.22,0
+3,28504,4.81,361879829.91,1.06,0.018,0.593,2.63,1.1
+4,146322,1.23,28554464.55,1,0,1,1.07,100
+5,22337,1.44,54708713.66,1.05,0.947,0.988,1.39,2.9

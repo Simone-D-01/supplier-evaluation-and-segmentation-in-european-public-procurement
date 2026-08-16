@@ -1,5 +1,28 @@
 # 05_clustering.R
 # Purpose: build supplier-level profiles and segment suppliers with K-means (RQ2)
+# Clustering and summary tables are based on UNWEIGHTED supplier-level MEDIANS.
+# Award-volume-weighted variables are kept as "_weighted" columns for robustness/appendix use only.
+#
+# Two methodological fixes applied in this version:
+# 1) Cluster IDs are remapped after every K-means run so that ID assignment is
+#    reproducible and anchored to a fixed economic variable (median_contract_value),
+#    instead of depending on K-means' arbitrary internal initialization order.
+# 2) Concentration-based labels use a STRICT CEILING comparison (HHI == 1 vs < 1)
+#    rather than a relative sample-median threshold. Diagnostic checks showed the
+#    sample-wide median HHI is itself exactly 1 at every level of aggregation
+#    (all suppliers, multi-award suppliers, multi-award years), so a relative
+#    benchmark cannot distinguish anything. HHI == 1 is a genuine categorical
+#    fact (100% of activity in a single CPV division), not a statistical
+#    artifact, so it is used directly as the cutoff.
+#
+# Rendering fix (this version): cluster_specialization.png (Figure 4.4) previously
+# plotted all five clusters as jittered/alpha-blended points. Clusters 1, 3 and 5
+# share the same coordinate on this plane (median_hhi_cpv = 1, median_cross_border_share = 0)
+# by construction, so no amount of jitter/alpha/downsampling can visually separate
+# them there -- it isn't an overplotting artifact, it's a genuine data feature.
+# The plot now represents that shared mass as a single labelled marker sized to its
+# combined share of the sample, and keeps individual jittered points only for
+# Clusters 2 and 4, which do have real dispersion on this plane.
 
 rm(list = ls())
 
@@ -10,7 +33,7 @@ options(stringsAsFactors = FALSE, scipen = 999)
 # -----------------------------------------------------------
 required_pkgs <- c(
   "here", "readr", "dplyr", "tidyr", "tibble",
-  "ggplot2", "fs", "cluster", "stringr"
+  "ggplot2", "fs", "cluster", "stringr", "rlang"
 )
 
 missing_pkgs <- required_pkgs[
@@ -31,10 +54,10 @@ message("Project root: ", root_dir)
 
 input_file <- here::here("data", "processed", "supplier_year_panel.csv")
 output_dir <- here::here("output")
-fig_dir    <- here::here("output", "figures")
-tab_dir    <- here::here("output", "tables")
-proc_dir   <- here::here("data", "processed")
-log_dir    <- here::here("logs")
+fig_dir <- here::here("output", "figures")
+tab_dir <- here::here("output", "tables")
+proc_dir <- here::here("data", "processed")
+log_dir <- here::here("logs")
 
 invisible(lapply(c(output_dir, fig_dir, tab_dir, proc_dir, log_dir), fs::dir_create))
 
@@ -66,6 +89,11 @@ diag_retry_seed_step <- 1000
 
 low_value_threshold <- 100
 plot_n_max <- 50000
+
+# Anchor variable used to give cluster IDs a fixed, reproducible meaning.
+# Clusters are always numbered in ascending order of their median contract value,
+# so "Cluster 1" consistently denotes the lowest-value segment across any rerun.
+cluster_id_anchor_var <- "median_contract_value"
 
 # -----------------------------------------------------------
 # 4) Helper functions
@@ -112,29 +140,70 @@ prepare_cluster_matrix <- function(df, vars) {
   if (!all(is.finite(out))) {
     stop("Non-finite values found in the standardized clustering matrix.")
   }
-  
   out
 }
 
+# -----------------------------------------------------------
+# 4b) Reproducible cluster-ID remapping
+# -----------------------------------------------------------
+# build_cluster_remap(): computes an old_id -> new_id lookup table by ranking
+# raw K-means cluster IDs according to the median of a fixed anchor variable.
+# This makes cluster numbering deterministic and independent of K-means'
+# internal (arbitrary) initialization order.
+build_cluster_remap <- function(cluster_raw, anchor_var) {
+  tibble::tibble(cluster_raw = cluster_raw, anchor = anchor_var) %>%
+    dplyr::group_by(cluster_raw) %>%
+    dplyr::summarise(anchor_median = na_median(anchor), .groups = "drop") %>%
+    dplyr::arrange(anchor_median) %>%
+    dplyr::mutate(cluster_new = dplyr::row_number())
+}
+
+# apply_cluster_remap(): maps a raw cluster vector to the new, fixed IDs.
+apply_cluster_remap <- function(cluster_raw, remap_tbl) {
+  lookup <- setNames(remap_tbl$cluster_new, remap_tbl$cluster_raw)
+  unname(lookup[as.character(cluster_raw)])
+}
+
+# reorder_centers(): reorders a kmeans centers matrix so that row i corresponds
+# to the new cluster ID i, consistent with apply_cluster_remap().
+reorder_centers <- function(centers, remap_tbl) {
+  old_order <- remap_tbl$cluster_raw[order(remap_tbl$cluster_new)]
+  centers[old_order, , drop = FALSE]
+}
+
+# stabilize_kmeans_ids(): convenience wrapper that remaps both the cluster
+# vector and the centers matrix of a kmeans fit object in one step.
+stabilize_kmeans_ids <- function(km_fit, anchor_var) {
+  remap_tbl <- build_cluster_remap(km_fit$cluster, anchor_var)
+  km_fit$cluster <- apply_cluster_remap(km_fit$cluster, remap_tbl)
+  km_fit$centers <- reorder_centers(km_fit$centers, remap_tbl)
+  attr(km_fit, "id_remap") <- remap_tbl
+  km_fit
+}
+
+# make_cluster_summary(): reports UNWEIGHTED supplier-level medians.
+# cluster_id is created safely by column NAME (not position).
 make_cluster_summary <- function(df, cluster_var = "cluster") {
   df %>%
     dplyr::filter(!is.na(.data[[cluster_var]])) %>%
     dplyr::group_by(.data[[cluster_var]]) %>%
     dplyr::summarise(
       n_suppliers = dplyr::n(),
-      median_awards_per_year = round(na_median(avg_awards_per_year), 2),
-      median_contract_value = round(na_median(avg_contract_value), 2),
-      median_buyer_countries = round(na_median(avg_buyer_countries), 2),
-      median_cross_border = round(na_median(avg_cross_border_share), 3),
-      median_hhi_cpv = round(na_median(avg_hhi_cpv), 3),
+      median_awards_per_year = round(na_median(median_awards_per_year_raw), 2),
+      median_contract_value = round(na_median(median_contract_value), 2),
+      median_buyer_countries = round(na_median(median_buyer_countries), 2),
+      median_cross_border = round(na_median(median_cross_border_share), 3),
+      median_hhi_cpv = round(na_median(median_hhi_cpv), 3),
       median_years_active = round(na_median(years_active), 2),
       pct_consortium = round(mean(supplier_is_consortium == 1, na.rm = TRUE) * 100, 1),
       .groups = "drop"
     ) %>%
-    dplyr::rename(cluster_id = 1) %>%
+    dplyr::rename(cluster_id = !!rlang::sym(cluster_var)) %>%
     dplyr::arrange(cluster_id)
 }
 
+# make_cluster_summary_means(): kept for robustness / appendix use, reports the
+# WEIGHTED (award-volume-weighted) supplier aggregates.
 make_cluster_summary_means <- function(df, cluster_var = "cluster") {
   df %>%
     dplyr::filter(!is.na(.data[[cluster_var]])) %>%
@@ -142,15 +211,15 @@ make_cluster_summary_means <- function(df, cluster_var = "cluster") {
     dplyr::summarise(
       n_suppliers = dplyr::n(),
       avg_awards_per_year = round(na_mean(avg_awards_per_year), 2),
-      avg_contract_value = round(na_mean(avg_contract_value), 2),
-      avg_buyer_countries = round(na_mean(avg_buyer_countries), 2),
-      avg_cross_border = round(na_mean(avg_cross_border_share), 3),
-      avg_hhi_cpv = round(na_mean(avg_hhi_cpv), 3),
+      avg_contract_value_weighted = round(na_mean(avg_contract_value_weighted), 2),
+      avg_buyer_countries_weighted = round(na_mean(avg_buyer_countries_weighted), 2),
+      avg_cross_border_weighted = round(na_mean(avg_cross_border_share_weighted), 3),
+      avg_hhi_cpv_weighted = round(na_mean(avg_hhi_cpv_weighted), 3),
       avg_years_active = round(na_mean(years_active), 2),
       pct_consortium = round(mean(supplier_is_consortium == 1, na.rm = TRUE) * 100, 1),
       .groups = "drop"
     ) %>%
-    dplyr::rename(cluster_id = 1) %>%
+    dplyr::rename(cluster_id = !!rlang::sym(cluster_var)) %>%
     dplyr::arrange(cluster_id)
 }
 
@@ -221,28 +290,52 @@ run_kmeans_retry <- function(
   )
 }
 
+# make_cluster_labels(): labels driven by the median-based summary.
+# Concentration-based labels use a STRICT CEILING comparison (HHI == 1 vs < 1)
+# rather than a relative sample-median threshold. Diagnostic checks showed the
+# sample-wide median HHI is itself exactly 1 at every level of aggregation
+# (all suppliers, multi-award suppliers, multi-award years), so a relative
+# benchmark cannot distinguish anything. HHI == 1 is a genuine categorical
+# fact (100% of activity in a single CPV division), not a statistical
+# artifact, so it is used directly as the cutoff.
+# Cross-border label is split by buyer-country diversity so the label
+# reflects both dimensions instead of only cross_border_share.
 make_cluster_labels <- function(summary_df, cluster_col = "cluster_id") {
   out <- summary_df %>%
     dplyr::mutate(
       provisional_label = dplyr::case_when(
-        pct_consortium > 50 & median_cross_border > 0.5 ~ "cross-border consortium suppliers",
-        median_awards_per_year > 2.5 & median_hhi_cpv < 0.9 ~ "higher-volume diversified suppliers",
-        median_contract_value <= low_value_threshold ~ "anomalous low-value suppliers",
-        median_cross_border > 0.5 ~ "cross-border suppliers",
-        median_hhi_cpv >= 0.95 & median_awards_per_year <= 1.5 ~ "local mono-sector suppliers",
+        pct_consortium > 50 & median_hhi_cpv >= 1 & median_awards_per_year <= 1.5 ~
+          "mono-sector consortium suppliers",
+        median_awards_per_year > 2.5 & median_hhi_cpv < 1 ~
+          "higher-volume, sector-diversified suppliers",
+        median_contract_value <= low_value_threshold ~
+          "anomalous low-value suppliers",
+        median_cross_border > 0.5 & median_buyer_countries > 1 ~
+          "cross-border, multi-country suppliers",
+        median_cross_border > 0.5 & median_buyer_countries <= 1 ~
+          "cross-border, single-market suppliers",
+        median_hhi_cpv >= 1 & median_awards_per_year <= 1.5 ~
+          "mono-sector suppliers",
+        median_hhi_cpv >= 1 & median_awards_per_year > 1.5 ~
+          "higher-volume mono-sector suppliers",
         TRUE ~ "mixed supplier profile"
       ),
       interpretation_note = dplyr::case_when(
         provisional_label == "anomalous low-value suppliers" ~
           "Likely influenced by data-quality issues in TED contract values.",
-        provisional_label == "cross-border consortium suppliers" ~
-          "High consortium incidence and cross-border orientation.",
-        provisional_label == "higher-volume diversified suppliers" ~
-          "More active suppliers with lower sector concentration.",
-        provisional_label == "local mono-sector suppliers" ~
-          "Primarily domestic and highly concentrated by sector.",
-        TRUE ~
-          "Interpret together with centroids and summary tables."
+        provisional_label == "mono-sector consortium suppliers" ~
+          "Primarily domestic, all award activity concentrated in a single CPV division, and consortium-heavy.",
+        provisional_label == "higher-volume, sector-diversified suppliers" ~
+          "More active suppliers whose award activity spans more than one CPV division.",
+        provisional_label == "cross-border, multi-country suppliers" ~
+          "Award activity spans multiple countries and multiple buyer countries.",
+        provisional_label == "cross-border, single-market suppliers" ~
+          "Award activity is cross-border but still concentrated on a single buyer country.",
+        provisional_label == "mono-sector suppliers" ~
+          "Primarily domestic, with all award activity concentrated in a single CPV division.",
+        provisional_label == "higher-volume mono-sector suppliers" ~
+          "More active suppliers whose award activity nonetheless remains fully concentrated in a single CPV division.",
+        TRUE ~ "Interpret together with centroids and summary tables."
       )
     )
   
@@ -303,6 +396,9 @@ panel <- panel %>%
   ) %>%
   dplyr::filter(!is.na(WIN_NAME_CLEAN), WIN_NAME_CLEAN != "")
 
+# supplier_profile carries BOTH:
+# - unweighted supplier-level MEDIANS (median_*) -> used for clustering & main tables
+# - award-volume-WEIGHTED means (*_weighted) -> kept for robustness / appendix
 supplier_profile <- panel %>%
   dplyr::group_by(WIN_NAME_CLEAN) %>%
   dplyr::summarise(
@@ -319,12 +415,21 @@ supplier_profile <- panel %>%
     n_valid_hhi_years = sum(!is.na(hhi_cpv) & !is.na(awards_count) & awards_count > 0),
     n_valid_buyer_country_years = sum(!is.na(distinct_buyer_countries) & !is.na(awards_count) & awards_count > 0),
     
+    # --- Unweighted supplier-level medians (PRIMARY, thesis section 4.5) ---
     avg_awards_per_year = na_mean(awards_count),
-    avg_contract_value = weighted_mean_safe(avg_award_value, awards_count),
-    avg_buyer_countries = weighted_mean_safe(distinct_buyer_countries, awards_count),
-    avg_cross_border_share = weighted_mean_safe(cross_border_share, awards_count),
-    avg_hhi_cpv = weighted_mean_safe(hhi_cpv, awards_count),
+    median_awards_per_year_raw = na_median(awards_count),
+    median_contract_value = na_median(avg_award_value),
+    median_buyer_countries = na_median(distinct_buyer_countries),
+    median_cross_border_share = na_median(cross_border_share),
+    median_hhi_cpv = na_median(hhi_cpv),
     
+    # --- Award-volume-weighted means (ROBUSTNESS / appendix only) ---
+    avg_contract_value_weighted = weighted_mean_safe(avg_award_value, awards_count),
+    avg_buyer_countries_weighted = weighted_mean_safe(distinct_buyer_countries, awards_count),
+    avg_cross_border_share_weighted = weighted_mean_safe(cross_border_share, awards_count),
+    avg_hhi_cpv_weighted = weighted_mean_safe(hhi_cpv, awards_count),
+    
+    # --- Simple unweighted means (kept for reference) ---
     avg_buyer_countries_unweighted = na_mean(distinct_buyer_countries),
     avg_cross_border_share_unweighted = na_mean(cross_border_share),
     avg_hhi_cpv_unweighted = na_mean(hhi_cpv),
@@ -334,7 +439,8 @@ supplier_profile <- panel %>%
   ) %>%
   dplyr::mutate(
     log_avg_awards_per_year = log1p(avg_awards_per_year),
-    log_avg_contract_value = log1p(avg_contract_value),
+    log_median_awards_per_year = log1p(median_awards_per_year_raw),
+    log_median_contract_value = log1p(median_contract_value),
     coverage_value = n_valid_value_years / n_supplier_years,
     coverage_cross_border = n_valid_cross_border_years / n_supplier_years,
     coverage_hhi = n_valid_hhi_years / n_supplier_years,
@@ -346,12 +452,14 @@ message("Suppliers in supplier profile: ", nrow(supplier_profile))
 # -----------------------------------------------------------
 # 7) Clustering input
 # -----------------------------------------------------------
+# Clustering runs on UNWEIGHTED supplier-level median variables,
+# consistent with the thesis interpretation in section 4.5.
 cluster_vars <- c(
-  "log_avg_awards_per_year",
-  "log_avg_contract_value",
-  "avg_buyer_countries",
-  "avg_cross_border_share",
-  "avg_hhi_cpv",
+  "log_median_awards_per_year",
+  "log_median_contract_value",
+  "median_buyer_countries",
+  "median_cross_border_share",
+  "median_hhi_cpv",
   "years_active",
   "supplier_is_consortium"
 )
@@ -530,7 +638,7 @@ ggplot2::ggsave(
 )
 
 # -----------------------------------------------------------
-# 11) Final K-means
+# 11) Final K-means (with reproducible cluster-ID remapping)
 # -----------------------------------------------------------
 message("Estimating final K-means with K = ", final_k, " ...")
 
@@ -543,8 +651,16 @@ km_final <- run_kmeans(
   algorithm = kmeans_algorithm
 )
 
+# Remap raw K-means cluster IDs to fixed IDs ordered by ascending median
+# contract value, so cluster numbering no longer depends on K-means'
+# internal initialization order and is stable across reruns.
+km_final <- stabilize_kmeans_ids(km_final, cluster_data[[cluster_id_anchor_var]])
+
+message("Cluster-ID remap applied (main run), anchor = ", cluster_id_anchor_var, ":")
+print(attr(km_final, "id_remap"))
+
 cluster_data_main <- cluster_data %>%
-  dplyr::mutate(cluster = factor(km_final$cluster))
+  dplyr::mutate(cluster = factor(km_final$cluster, levels = seq_len(final_k)))
 
 supplier_profile_main <- supplier_profile %>%
   dplyr::left_join(
@@ -580,20 +696,48 @@ plot_n <- min(plot_n_max, nrow(cluster_data_main))
 
 set.seed(42)
 plot_df <- cluster_data_main %>%
-  dplyr::slice_sample(n = plot_n)
+  dplyr::slice_sample(n = plot_n) %>%
+  dplyr::mutate(cluster = factor(cluster, levels = as.character(seq_len(final_k))))
+
+cluster_palette <- c(
+  "1" = "#d73027",
+  "2" = "#4575b4",
+  "3" = "#1a9850",
+  "4" = "#984ea3",
+  "5" = "#f46d43"
+)
 
 p1 <- ggplot2::ggplot(
   plot_df,
-  ggplot2::aes(x = log_avg_awards_per_year, y = log_avg_contract_value, color = cluster)
+  ggplot2::aes(x = log_median_awards_per_year, y = log_median_contract_value)
 ) +
-  ggplot2::geom_point(alpha = 0.25, size = 0.8) +
+  ggplot2::geom_point(
+    color = "grey78",
+    alpha = 0.10,
+    size = 0.55
+  ) +
+  ggplot2::geom_point(
+    ggplot2::aes(color = cluster),
+    alpha = 0.16,
+    size = 0.60
+  ) +
+  ggplot2::scale_color_manual(values = cluster_palette) +
+  ggplot2::guides(
+    color = ggplot2::guide_legend(
+      override.aes = list(size = 3.2, alpha = 1)
+    )
+  ) +
   ggplot2::labs(
-    title = "Supplier segmentation: volume vs contract value",
-    x = "Log average awards per year",
-    y = "Log average contract value",
+    title = "Supplier segmentation: volume vs contract value (medians)",
+    x = "Log median awards per year",
+    y = "Log median contract value",
     color = "Cluster"
   ) +
-  ggplot2::theme_minimal(base_size = 12)
+  ggplot2::theme_minimal(base_size = 12) +
+  ggplot2::theme(
+    legend.position = "right",
+    legend.title = ggplot2::element_text(face = "bold")
+  )
 
 ggplot2::ggsave(
   filename = here::here("output", "figures", "cluster_scatter.png"),
@@ -603,18 +747,80 @@ ggplot2::ggsave(
   dpi = 300
 )
 
-p2 <- ggplot2::ggplot(
-  plot_df,
-  ggplot2::aes(x = avg_hhi_cpv, y = avg_cross_border_share, color = cluster)
-) +
-  ggplot2::geom_point(alpha = 0.25, size = 0.8) +
+# -----------------------------------------------------------
+# 12b) Figure 4.4 (cluster_specialization.png): dominant-mass fix
+# -----------------------------------------------------------
+# Clusters 1, 3 and 5 share median_hhi_cpv = 1 and median_cross_border_share = 0
+# EXACTLY (see cluster_summary), so on this specific plane they occupy a single
+# coordinate rather than a dense cloud around one. Jitter/alpha/downsampling
+# cannot separate them there because there is nothing to separate -- it is a
+# genuine feature of the clustering solution, not a rendering artifact.
+#
+# The dominant mass is therefore summarised into a single labelled marker
+# (share computed from the FULL main-run data, not the plot_n_max downsample,
+# so the percentage reported on the figure matches the thesis text exactly).
+# Clusters 2 and 4, which do have real dispersion on this plane, are still
+# plotted as individual jittered points, reusing the existing plot_df sample.
+
+dominant_clusters <- c("1", "3", "5")
+
+dominant_mass_p2 <- cluster_data_main %>%
+  dplyr::filter(as.character(cluster) %in% dominant_clusters) %>%
+  dplyr::summarise(
+    median_hhi_cpv = 1,
+    median_cross_border_share = 0,
+    n = dplyr::n()
+  ) %>%
+  dplyr::mutate(
+    share = n / nrow(cluster_data_main),
+    dominant_label = paste0(
+      "Clusters 1, 3, 5\n", round(share * 100), "% of sample"
+    )
+  )
+
+scatter_clusters_p2 <- plot_df %>%
+  dplyr::filter(!as.character(cluster) %in% dominant_clusters)
+
+p2 <- ggplot2::ggplot() +
+  ggplot2::geom_point(
+    data = scatter_clusters_p2,
+    ggplot2::aes(x = median_hhi_cpv, y = median_cross_border_share, color = cluster),
+    position = ggplot2::position_jitter(width = 0.01, height = 0.01),
+    alpha = 0.35,
+    size = 0.9
+  ) +
+  ggplot2::geom_point(
+    data = dominant_mass_p2,
+    ggplot2::aes(x = median_hhi_cpv, y = median_cross_border_share),
+    color = "grey45",
+    alpha = 0.75,
+    size = 14,
+    shape = 16
+  ) +
+  ggplot2::geom_text(
+    data = dominant_mass_p2,
+    ggplot2::aes(x = median_hhi_cpv, y = median_cross_border_share, label = dominant_label),
+    hjust = 1.1,
+    vjust = -0.3,
+    size = 3.4
+  ) +
+  ggplot2::scale_color_manual(values = cluster_palette) +
+  ggplot2::guides(
+    color = ggplot2::guide_legend(
+      override.aes = list(size = 3.2, alpha = 1)
+    )
+  ) +
   ggplot2::labs(
-    title = "Supplier segmentation: specialization vs cross-border orientation",
-    x = "Average HHI sector concentration",
-    y = "Average cross-border share",
+    title = "Supplier segmentation: sectoral concentration vs cross-border orientation (medians)",
+    x = "Median HHI sector concentration",
+    y = "Median cross-border share",
     color = "Cluster"
   ) +
-  ggplot2::theme_minimal(base_size = 12)
+  ggplot2::theme_minimal(base_size = 12) +
+  ggplot2::theme(
+    legend.position = "right",
+    legend.title = ggplot2::element_text(face = "bold")
+  )
 
 ggplot2::ggsave(
   filename = here::here("output", "figures", "cluster_specialization.png"),
@@ -626,15 +832,16 @@ ggplot2::ggsave(
 
 # -----------------------------------------------------------
 # 13) Robustness: exclude very low-value suppliers, same K
+#     (same reproducible cluster-ID remapping applied)
 # -----------------------------------------------------------
 message(
-  "Running robustness clustering excluding avg_contract_value <= ",
+  "Running robustness clustering excluding median_contract_value <= ",
   low_value_threshold,
   ", with K = ", robust_same_k, " ..."
 )
 
 cluster_data_robust <- cluster_data %>%
-  dplyr::filter(avg_contract_value > low_value_threshold)
+  dplyr::filter(median_contract_value > low_value_threshold)
 
 if (nrow(cluster_data_robust) < robust_same_k) {
   stop("Too few observations in the low-value filtered sample for robustness clustering.")
@@ -651,8 +858,13 @@ km_robust <- run_kmeans(
   algorithm = kmeans_algorithm
 )
 
+km_robust <- stabilize_kmeans_ids(km_robust, cluster_data_robust[[cluster_id_anchor_var]])
+
+message("Cluster-ID remap applied (robust k=", robust_same_k, " run):")
+print(attr(km_robust, "id_remap"))
+
 cluster_data_robust <- cluster_data_robust %>%
-  dplyr::mutate(cluster_robust = factor(km_robust$cluster))
+  dplyr::mutate(cluster_robust = factor(km_robust$cluster, levels = seq_len(robust_same_k)))
 
 supplier_profile_robust <- supplier_profile %>%
   dplyr::left_join(
@@ -680,6 +892,7 @@ readr::write_csv(
 
 # -----------------------------------------------------------
 # 14) Robustness: filtered exploratory K = 4
+#     (same reproducible cluster-ID remapping applied)
 # -----------------------------------------------------------
 message("Running exploratory filtered clustering with K = ", robust_alt_k, " ...")
 
@@ -692,9 +905,14 @@ km_robust_k4 <- run_kmeans(
   algorithm = kmeans_algorithm
 )
 
+km_robust_k4 <- stabilize_kmeans_ids(km_robust_k4, cluster_data_robust[[cluster_id_anchor_var]])
+
+message("Cluster-ID remap applied (robust k=", robust_alt_k, " run):")
+print(attr(km_robust_k4, "id_remap"))
+
 cluster_data_robust_k4 <- cluster_data_robust %>%
   dplyr::select(-cluster_robust) %>%
-  dplyr::mutate(cluster_robust_k4 = factor(km_robust_k4$cluster))
+  dplyr::mutate(cluster_robust_k4 = factor(km_robust_k4$cluster, levels = seq_len(robust_alt_k)))
 
 supplier_profile_robust_k4 <- supplier_profile %>%
   dplyr::left_join(
@@ -705,6 +923,7 @@ supplier_profile_robust_k4 <- supplier_profile %>%
 cluster_summary_robust_k4 <- make_cluster_summary(supplier_profile_robust_k4, "cluster_robust_k4")
 cluster_summary_robust_k4_means <- make_cluster_summary_means(supplier_profile_robust_k4, "cluster_robust_k4")
 cluster_sizes_robust_k4 <- make_cluster_size_table(cluster_data_robust_k4$cluster_robust_k4, "cluster_robust_k4")
+
 cluster_labels_robust_k4 <- make_cluster_labels(cluster_summary_robust_k4, "cluster_id")
 
 readr::write_csv(cluster_data_robust_k4, here::here("data", "processed", "supplier_profiles_robust_k4_input.csv"))
@@ -726,7 +945,7 @@ readr::write_csv(
 # 15) Transition table
 # -----------------------------------------------------------
 cluster_transition_tbl <- supplier_profile %>%
-  dplyr::select(WIN_NAME_CLEAN, avg_contract_value) %>%
+  dplyr::select(WIN_NAME_CLEAN, median_contract_value) %>%
   dplyr::left_join(
     cluster_data_main %>% dplyr::select(WIN_NAME_CLEAN, cluster),
     by = "WIN_NAME_CLEAN"
@@ -755,18 +974,18 @@ anomaly_tbl <- supplier_profile %>%
   dplyr::summarise(
     suppliers_profile_total = dplyr::n(),
     suppliers_complete_clustering = sum(
-      !is.na(log_avg_awards_per_year) &
-        !is.na(log_avg_contract_value) &
-        !is.na(avg_buyer_countries) &
-        !is.na(avg_cross_border_share) &
-        !is.na(avg_hhi_cpv) &
+      !is.na(log_median_awards_per_year) &
+        !is.na(log_median_contract_value) &
+        !is.na(median_buyer_countries) &
+        !is.na(median_cross_border_share) &
+        !is.na(median_hhi_cpv) &
         !is.na(years_active) &
         !is.na(supplier_is_consortium)
     ),
-    suppliers_avg_contract_value_eq1 = sum(avg_contract_value == 1, na.rm = TRUE),
-    suppliers_avg_contract_value_le100 = sum(avg_contract_value <= 100, na.rm = TRUE),
-    share_avg_contract_value_eq1 = mean(avg_contract_value == 1, na.rm = TRUE),
-    share_avg_contract_value_le100 = mean(avg_contract_value <= 100, na.rm = TRUE)
+    suppliers_median_contract_value_eq1 = sum(median_contract_value == 1, na.rm = TRUE),
+    suppliers_median_contract_value_le100 = sum(median_contract_value <= 100, na.rm = TRUE),
+    share_median_contract_value_eq1 = mean(median_contract_value == 1, na.rm = TRUE),
+    share_median_contract_value_le100 = mean(median_contract_value <= 100, na.rm = TRUE)
   )
 
 readr::write_csv(
@@ -788,6 +1007,7 @@ clustering_log <- tibble::tibble(
     "robust_same_k",
     "robust_alt_k",
     "low_value_threshold",
+    "cluster_id_anchor_var",
     "kmeans_algorithm",
     "kmeans_nstart_diag",
     "kmeans_nstart_final",
@@ -799,10 +1019,10 @@ clustering_log <- tibble::tibble(
     "suppliers_excluded_low_value_robustness",
     "suppliers_in_robustness_clustering",
     "share_low_value_excluded",
-    "suppliers_avg_contract_value_eq1",
-    "suppliers_avg_contract_value_le100",
-    "share_avg_contract_value_eq1",
-    "share_avg_contract_value_le100",
+    "suppliers_median_contract_value_eq1",
+    "suppliers_median_contract_value_le100",
+    "share_median_contract_value_eq1",
+    "share_median_contract_value_le100",
     "mean_coverage_value",
     "mean_coverage_cross_border",
     "mean_coverage_hhi",
@@ -818,6 +1038,7 @@ clustering_log <- tibble::tibble(
     robust_same_k,
     robust_alt_k,
     low_value_threshold,
+    cluster_id_anchor_var,
     kmeans_algorithm,
     kmeans_nstart_diag,
     kmeans_nstart_final,
@@ -829,10 +1050,10 @@ clustering_log <- tibble::tibble(
     nrow(cluster_data) - nrow(cluster_data_robust),
     nrow(cluster_data_robust),
     (nrow(cluster_data) - nrow(cluster_data_robust)) / nrow(cluster_data),
-    anomaly_tbl$suppliers_avg_contract_value_eq1,
-    anomaly_tbl$suppliers_avg_contract_value_le100,
-    anomaly_tbl$share_avg_contract_value_eq1,
-    anomaly_tbl$share_avg_contract_value_le100,
+    anomaly_tbl$suppliers_median_contract_value_eq1,
+    anomaly_tbl$suppliers_median_contract_value_le100,
+    anomaly_tbl$share_median_contract_value_eq1,
+    anomaly_tbl$share_median_contract_value_le100,
     mean(supplier_profile$coverage_value, na.rm = TRUE),
     mean(supplier_profile$coverage_cross_border, na.rm = TRUE),
     mean(supplier_profile$coverage_hhi, na.rm = TRUE),

@@ -229,6 +229,43 @@ n_after_cleaning <- nrow(ted_clean)
 message("Rows after base cleaning: ", n_after_cleaning)
 
 # -----------------------------------------------------------
+# 6b) CPV division validation
+# -----------------------------------------------------------
+# Purpose: Table 2.2 (row 4) claims "All 45 official CPV divisions present;
+# no malformed or out-of-range codes detected," but nothing in this script
+# or in cleaning_log.csv previously supported that claim. This block adds
+# the missing validation:
+#   (i)  confirms every non-missing CPV_2digit value is a well-formed
+#        two-digit numeric string -- guaranteed by construction above
+#        (anything shorter than 2 digits is already set to NA), but
+#        verified explicitly here rather than assumed;
+#   (ii) counts how many distinct divisions are actually observed in the
+#        cleaned data, so the Table 2.2 wording can be tied to a real
+#        number either way. This does not require an external CPV
+#        codelist -- it only reports what is actually present.
+cpv_2digit_nonmissing <- ted_clean$CPV_2digit[!is.na(ted_clean$CPV_2digit)]
+
+n_cpv_2digit_malformed <- sum(!grepl("^[0-9]{2}$", cpv_2digit_nonmissing))
+
+cpv_division_validation <- tibble::tibble(CPV_2digit = cpv_2digit_nonmissing) %>%
+  dplyr::count(CPV_2digit, name = "n") %>%
+  dplyr::mutate(share = n / sum(n)) %>%
+  dplyr::arrange(CPV_2digit)
+
+n_distinct_cpv_divisions <- nrow(cpv_division_validation)
+
+message(
+  "CPV division validation: ", n_distinct_cpv_divisions,
+  " distinct two-digit divisions observed; ",
+  n_cpv_2digit_malformed, " malformed CPV_2digit values (expect 0)."
+)
+
+cpv_division_validation_file <- here::here("logs", "cpv_division_validation.csv")
+readr::write_csv(cpv_division_validation, cpv_division_validation_file)
+
+message("CPV division validation saved to: ", cpv_division_validation_file)
+
+# -----------------------------------------------------------
 # 7) Deduplication with diagnostics
 # -----------------------------------------------------------
 n_exact_dup_rows <- sum(duplicated(ted_clean))
@@ -393,7 +430,9 @@ log_clean <- tibble::tibble(
     "after_dedup",
     "n_missing_award_value",
     "n_missing_supplier_clean",
-    "n_missing_crit_code_after_dedup"
+    "n_missing_crit_code_after_dedup",
+    "n_distinct_cpv_divisions",
+    "n_cpv_2digit_malformed"
   ),
   value = c(
     n_raw_rows,
@@ -412,7 +451,9 @@ log_clean <- tibble::tibble(
     n_after_dedup,
     sum(is.na(ted_clean$award_value)),
     sum(is.na(ted_clean$WIN_NAME_CLEAN) | ted_clean$WIN_NAME_CLEAN == ""),
-    sum(is.na(ted_clean$CRIT_CODE))
+    sum(is.na(ted_clean$CRIT_CODE)),
+    n_distinct_cpv_divisions,
+    n_cpv_2digit_malformed
   )
 )
 

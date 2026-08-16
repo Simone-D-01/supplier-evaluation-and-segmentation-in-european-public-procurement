@@ -1,4 +1,4 @@
-# Supplier evaluation and segmentation in European public procurement
+# Supplier Evaluation and Segmentation in European Public Procurement: Empirical Evidence from TED Data,
 
 This repository contains the empirical workflow developed for a master's thesis on supplier performance and supplier segmentation in European public procurement using Tenders Electronic Daily (TED) contract award data from 2018 to 2023.
 
@@ -9,7 +9,7 @@ The repository is designed as a reproducible R pipeline. It includes the scripts
 The empirical analysis focuses on TED Contract Award Notice (CAN) data and addresses two research questions:
 
 - **RQ1:** What factors are associated with supplier performance in European public procurement, measured through the number and total value of awarded contracts at supplier-year level?
-- **RQ2:** Can suppliers be grouped into meaningful segments on the basis of their observed procurement behavior and performance patterns?
+- **RQ2:** Can distinct types of suppliers be identified in European public procurement on the basis of their structural characteristics and observed procurement behaviour?
 
 ## Repository structure
 
@@ -18,11 +18,11 @@ The empirical analysis focuses on TED Contract Award Notice (CAN) data and addre
 ├── README.md
 ├── thesis-ted-repro.Rproj
 ├── R/
-│   ├── 01download.R
-│   ├── 02cleaning.R
-│   ├── 03panelbuild.R
-│   ├── 04regression.R
-│   ├── 05clustering.R
+│   ├── 01_download.R
+│   ├── 02_cleaning.R
+│   ├── 03_panelbuild.R
+│   ├── 04_regression.R
+│   ├── 05_clustering.R
 │   └── README.md
 ├── data/
 │   ├── raw/

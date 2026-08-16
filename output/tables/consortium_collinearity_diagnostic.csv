@@ -1,0 +1,11 @@
+metric,value
+is_consortium_coef_refit_with_country_fe,-0.0551296876770937
+is_consortium_se_refit_with_country_fe,0.00134311424657115
+is_consortium_dropped_by_fixest,0
+r2_is_consortium_on_country_fe,0.104331768696749
+n_countries_checked,182
+n_countries_zero_within_variance,129
+share_countries_zero_within_variance,0.708791208791209
+n_supplier_years_zero_variance_countries,1371
+n_supplier_years_total,1328987
+share_supplier_years_zero_variance_countries,0.00103161279982423

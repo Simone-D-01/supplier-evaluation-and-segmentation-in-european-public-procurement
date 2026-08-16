@@ -17,6 +17,12 @@ The tables report the main descriptive statistics, regression results, clusterin
 - `regression_robustness.csv` — robustness regression tables.
 - `regression_incremental.csv` — incremental comparison tables.
 
+### Specification diagnostics
+
+- `consortium_collinearity_diagnostic.csv` — collinearity diagnostic for `is_consortium` against supplier-country fixed effects: refitted coefficient and standard error, R² of `is_consortium` on `country_fe`, and the zero-within-variance share both by country and by supplier-year observation.
+- `consortium_country_variance_check.csv` — per-country breakdown underlying that diagnostic: supplier-year count and within-country standard deviation of `is_consortium` for each country.
+- `specialization_hhi_collinearity_check.csv` — correlation between `specialization_share` and `hhi_cpv` on the extended value regression sample, supporting the decision to exclude `specialization_share` from the regressions in favor of `hhi_cpv`.
+
 ### Clustering diagnostics and summaries
 
 - `clustering_elbow.csv` — elbow diagnostic values across cluster counts.
@@ -44,7 +50,7 @@ The tables report the main descriptive statistics, regression results, clusterin
 - `cluster_labels_robust_k4.csv` — provisional labels for the filtered K = 4 solution.
 - `cluster_centroids_scaled_robust_k4.csv` — scaled cluster centroids for the filtered K = 4 solution.
 - `cluster_transition_main_vs_robust_k4.csv` — transition table between the main and filtered solutions.
-- `clustering_value_anomalies.csv` — diagnostics for unusually low average contract values.
+- `clustering_value_anomalies.csv` — diagnostics for unusually low median contract values.
 
 ## Notes
 

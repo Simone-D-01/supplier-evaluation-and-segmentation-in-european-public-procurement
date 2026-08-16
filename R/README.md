@@ -40,7 +40,7 @@ Purpose: initialize the project folder structure and prepare the raw TED CAN inp
 
 Main operations:
 - Detects the project root automatically.
-- Creates the required folders (`data/raw/tedcan`, `data/processed`, `logs`, and `scripts`) if they do not already exist.
+- Creates the required folders (`data/raw/tedcan`, `data/processed`, `logs`, and `R`) if they do not already exist.
 - Defines the six annual TED CAN source files for the period 2018–2023.
 - Downloads missing source files when automatic download is enabled.
 - Uses annual TED CAN source URLs that currently point to ZIP archives.
@@ -83,6 +83,7 @@ Outputs:
 - `data/processed/ted_awards_clean.csv`
 - `logs/cleaning_log.csv`
 - `logs/id_award_conflicts.csv`
+- `logs/cpv_division_validation.csv`
 
 Methodological note:
 The cleaning step defines the empirical foundation of the thesis by transforming raw TED notice files into a consistent award-level dataset. The time window is enforced using the actual award date rather than the notice publication year, because the research question concerns when contracts were awarded.
@@ -111,10 +112,8 @@ Outputs:
 - `logs/win_country_code_validation.csv`
 - `logs/win_country_code_validation_summary.csv`
 - `logs/crit_code_validation.csv`
-- `logs/crit_code_frequency.csv`
-- `logs/crit_code_by_year.csv`
-- `logs/crit_code_by_procedure.csv`
-- `logs/crit_code_duplicate_check.csv`
+- `logs/crit_code_by_year_validation.csv`
+- `logs/crit_code_by_procedure_validation.csv`
 
 Methodological note:
 The panel unit of analysis is supplier-year. This level is appropriate because RQ1 focuses on the determinants of supplier performance over time, while RQ2 later uses the same panel as the basis for constructing longer-run supplier profiles.
@@ -128,7 +127,7 @@ Main operations:
 - Generate descriptive statistics and a correlation matrix automatically.
 - Standardize regressors using `as.numeric(scale())`.
 - Retain `hhi_cpv` as the main specialization measure and exclude `specialization_share` from the regressions because of severe collinearity.
-- Include `is_consortium` only in models without supplier-country fixed effects when the variable is collinear with country fixed effects.
+- Test whether is_consortium is collinear with supplier-country fixed effects (refit with is_consortium included, fixest::collinearity(), R² of is_consortium on country_fe, and a zero-within-variance country check). Retain is_consortium in every specification, since the diagnostic finds no near-perfect collinearity.
 - Estimate year fixed-effects models, baseline year plus supplier-country fixed-effects models, common-sample baseline fixed-effects models, and extended models including `price_criteria_share`.
 - Use the common sample for the baseline models as the benchmark for evaluating the incremental contribution of price_criteria_share, since the baseline and extended specifications are estimated on the same supplier-year observations.
 - Add an enhanced final specification with procedure fixed effects based on `top_procedure`, the modal procedure observed within each supplier-year.
@@ -138,12 +137,15 @@ Main operations:
 
 Outputs:
 - `output/tables/descriptive_stats.csv`
+- `output/tables/consortium_collinearity_diagnostic.csv`
+- `output/tables/consortium_country_variance_check.csv`
 - `output/tables/correlation_matrix.csv`
 - `output/figures/correlation_matrix.png`
 - `output/tables/regression_main.csv`
 - `output/tables/regression_robustness.csv`
 - `output/tables/regression_incremental.csv`
 - `logs/regression_log.csv`
+- `output/tables/specialization_hhi_collinearity_check.csv`
 
 Methodological note:
 The regression analysis is conducted at supplier-year level because the objective is to explain variation in supplier performance over time, measured both in terms of award count and total contract value. The script estimates a sequence of comparable models rather than a single specification, allowing comparison across baseline, extended, and robustness designs.
@@ -155,17 +157,19 @@ Purpose: construct supplier-level profiles from the supplier-year panel and segm
 Main operations:
 - Read `data/processed/supplier_year_panel.csv`.
 - Aggregate supplier-year observations into one supplier-level profile for segmentation.
-- Use a standardized set of supplier features for clustering: average awards per year, average contract value, buyer-country diversification, cross-border orientation, sector concentration, years active, and consortium status.
+- Use a standardized set of unweighted median supplier features for clustering: median awards per year, median contract value, buyer-country diversification, cross-border orientation, sector concentration, years active, and consortium status. Award-volume-weighted means of the same monetary and structural variables are also computed and retained separately for robustness/appendix use only.
 - Estimate elbow diagnostics on the full clustering sample.
 - Estimate silhouette diagnostics on repeated random subsamples of 5,000 suppliers to avoid infeasible full-sample distance matrices.
 - Use the Lloyd algorithm for K-means estimation to improve computational stability.
 - Estimate the final K-means model with `K = 5`.
+- Remap raw K-means cluster IDs after every run so that cluster numbering is reproducible and anchored to `median_contract_value`: clusters are always numbered in ascending order of median contract value, independently of K-means' internal initialization order.
+- Assign cluster labels from a fixed rule based on each cluster's median profile, using a strict HHI ceiling (HHI = 1 denotes mono-sector, HHI < 1 denotes sector-diversified) rather than a relative sample-median benchmark, since the sample-wide median HHI is itself equal to 1 at every level of aggregation and cannot discriminate between clusters.
 - Save cluster summaries using medians as the main descriptive statistics and means as complementary evidence.
 - Add cluster-size tables, scaled centroid tables, provisional interpretation tables, and robustness solutions.
-- Estimate a robustness clustering excluding suppliers with `avg_contract_value < 100`.
+- Estimate a robustness clustering excluding suppliers with `median_contract_value < 100`.
 - Estimate an additional exploratory filtered clustering with `K = 4`.
 - Create a transition table mapping the main `K = 5` solution to the filtered `K = 4` solution.
-- Report anomaly diagnostics for suppliers with extremely low average contract values.
+- Report anomaly diagnostics for suppliers with extremely low median contract values.
 
 Outputs:
 - `data/processed/supplier_profiles.csv`

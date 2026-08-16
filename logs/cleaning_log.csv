@@ -16,3 +16,5 @@ after_dedup,4061952
 n_missing_award_value,55558
 n_missing_supplier_clean,0
 n_missing_crit_code_after_dedup,263754
+n_distinct_cpv_divisions,45
+n_cpv_2digit_malformed,0

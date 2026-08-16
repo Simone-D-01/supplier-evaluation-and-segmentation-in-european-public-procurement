@@ -267,8 +267,220 @@ dev.off()
 message("Correlation matrix saved.")
 
 # -----------------------------------------------------------
+# 7b) Consortium collinearity diagnostic
+# -----------------------------------------------------------
+# Purpose: Paragraphs 3.2 and 5.1 originally asserted that is_consortium was
+# dropped from every country-FE specification "due to near-perfect
+# collinearity with country identity." That claim was never tested anywhere
+# in this script; is_consortium was simply hand-omitted from the A2-A4/B2-B4
+# formulas. This section runs three complementary checks BEFORE the main
+# models are estimated, to establish whether the claim holds. Result: it
+# does not (see consortium_collinearity_diagnostic.csv -- is_consortium is
+# not dropped by fixest, R2 against country_fe is ~0.10, and the countries
+# with zero within-country variance hold ~0.1% of the estimation sample by
+# supplier-year count, even though they make up ~71% of the 182 countries
+# themselves). Section 8 below has accordingly been updated to re-include
+# is_consortium in the A2-A5/B2-B6 specifications rather than omitting it.
+#
+#   (i)   Re-fit the country-FE model WITH is_consortium included. If the
+#         claim is right, fixest's own collinearity detection should flag or
+#         drop it automatically -- exactly what would have happened if the
+#         original code had simply left it in the formula instead of
+#         omitting it by hand. Watch the console for a fixest note to that
+#         effect (e.g. "NA coefficient" / a collinearity warning); if none
+#         appears and is_consortium returns a normal estimated coefficient
+#         and standard error, that is direct evidence against "near-perfect."
+#   (ii)  fixest::collinearity() on that same re-fitted model, which reports
+#         for each regressor how much of its variation is absorbed by the
+#         fixed-effect structure -- the formal counterpart of check (i).
+#   (iii) R-squared from regressing is_consortium on country_fe alone, plus
+#         two versions of the zero-within-country-variance share: one across
+#         countries (how many of the 182 countries show no variation), and
+#         one across supplier-year observations (what fraction of the
+#         estimation sample those zero-variance countries actually
+#         contribute). The two are very different -- most zero-variance
+#         countries are tiny by observation count -- so both are computed
+#         explicitly rather than reporting only the country-level figure.
+#         This quantifies the mechanism Paragraph 3.2 describes ("varies
+#         substantially across countries but very little within them")
+#         directly, regardless of what happens in (i)-(ii).
+
+message("\n--- Consortium collinearity diagnostic (thesis review item Q) ---")
+
+modA2_with_consortium <- fixest::feols(
+  log_awards_count ~
+    z_distinct_buyers +
+    z_distinct_buyer_countries +
+    z_cross_border_share +
+    z_hhi_cpv +
+    z_years_active +
+    is_consortium | year_fe + country_fe,
+  cluster = ~ WIN_NAME_CLEAN,
+  data = panel_count_base
+)
+
+message("\n--- Re-fitted country-FE model WITH is_consortium included ---")
+message("(check above/below for any fixest collinearity note on is_consortium)")
+print(summary(modA2_with_consortium))
+
+message("\n--- fixest::collinearity() report ---")
+print(fixest::collinearity(modA2_with_consortium))
+
+consortium_country_lm <- lm(is_consortium ~ country_fe, data = panel_count_base)
+consortium_country_r2 <- summary(consortium_country_lm)$r.squared
+message("R-squared, is_consortium ~ country_fe: ", round(consortium_country_r2, 4))
+
+country_variance_check <- panel_count_base %>%
+  dplyr::group_by(country_fe) %>%
+  dplyr::summarise(
+    n_supplier_years = dplyr::n(),
+    sd_is_consortium = sd(is_consortium, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  dplyr::mutate(zero_within_variance = is.na(sd_is_consortium) | sd_is_consortium == 0)
+
+share_countries_zero_variance <- mean(country_variance_check$zero_within_variance)
+n_countries_checked <- nrow(country_variance_check)
+
+message(
+  "Share of countries with zero within-country variance in is_consortium: ",
+  round(share_countries_zero_variance, 4),
+  " (", sum(country_variance_check$zero_within_variance), " of ", n_countries_checked, " countries)"
+)
+
+# Sample-weighted counterpart of the country-level share above. The country
+# share treats every country equally regardless of size, so it is dominated
+# by very small countries (e.g. a handful of supplier-years each) and is NOT
+# the number Paragraph 3.2 cites. Weighting by n_supplier_years gives the
+# share of the actual estimation sample affected, which is the relevant
+# quantity for assessing whether the omitted variation matters for the
+# regression results.
+n_supplier_years_zero_variance_countries <- sum(
+  country_variance_check$n_supplier_years[country_variance_check$zero_within_variance]
+)
+n_supplier_years_total <- sum(country_variance_check$n_supplier_years)
+share_supplier_years_zero_variance_countries <-
+  n_supplier_years_zero_variance_countries / n_supplier_years_total
+
+message(
+  "Share of supplier-year observations in zero-within-variance countries: ",
+  round(share_supplier_years_zero_variance_countries * 100, 4),
+  "% (", n_supplier_years_zero_variance_countries, " of ", n_supplier_years_total, " supplier-years)"
+)
+
+is_consortium_coef_refit <- unname(coef(modA2_with_consortium)["is_consortium"])
+is_consortium_se_refit <- unname(fixest::se(modA2_with_consortium)["is_consortium"])
+
+message(
+  "is_consortium coefficient when re-included with country FE: ",
+  ifelse(is.na(is_consortium_coef_refit), "NA (dropped by fixest)", round(is_consortium_coef_refit, 4)),
+  ", SE: ",
+  ifelse(is.na(is_consortium_se_refit), "NA", round(is_consortium_se_refit, 4))
+)
+
+consortium_collinearity_diagnostic <- tibble::tibble(
+  metric = c(
+    "is_consortium_coef_refit_with_country_fe",
+    "is_consortium_se_refit_with_country_fe",
+    "is_consortium_dropped_by_fixest",
+    "r2_is_consortium_on_country_fe",
+    "n_countries_checked",
+    "n_countries_zero_within_variance",
+    "share_countries_zero_within_variance",
+    "n_supplier_years_zero_variance_countries",
+    "n_supplier_years_total",
+    "share_supplier_years_zero_variance_countries"
+  ),
+  value = as.character(c(
+    is_consortium_coef_refit,
+    is_consortium_se_refit,
+    is.na(is_consortium_coef_refit),
+    consortium_country_r2,
+    n_countries_checked,
+    sum(country_variance_check$zero_within_variance),
+    share_countries_zero_variance,
+    n_supplier_years_zero_variance_countries,
+    n_supplier_years_total,
+    share_supplier_years_zero_variance_countries
+  ))
+)
+
+readr::write_csv(
+  consortium_collinearity_diagnostic,
+  here::here("output", "tables", "consortium_collinearity_diagnostic.csv")
+)
+
+readr::write_csv(
+  country_variance_check,
+  here::here("output", "tables", "consortium_country_variance_check.csv")
+)
+
+message("Consortium collinearity diagnostic saved.")
+
+# -----------------------------------------------------------
+# 7c) Specialization-share / HHI collinearity check
+# -----------------------------------------------------------
+# Purpose: the thesis text (Figure 3.1 discussion) and R/README.md both
+# assert that specialization_share is excluded from the regressions because
+# of "near-perfect collinearity" with hhi_cpv. As with the is_consortium
+# claim addressed in Section 7b above, this was asserted but never actually
+# computed anywhere in the pipeline: specialization_share is left out of
+# corr_df and never enters any regression formula, so nothing backs the
+# claim with a saved number. This block computes the correlation directly,
+# on the same extended value sample used to build corr_df, so the claim can
+# be checked against real output rather than left as an assumption.
+#
+# Mechanically, the two measures are expected to track closely: hhi_cpv is
+# the sum of squared CPV-division shares and specialization_share is the
+# largest single share, so a supplier concentrated in one division scores
+# close to 1 on both. descriptive_stats.csv already shows specialization_share
+# has a mean of 0.974, consistent with most suppliers being close to that
+# single-division case.
+
+specialization_hhi_cor <- cor(
+  panel_value_ext$specialization_share,
+  panel_value_ext$hhi_cpv,
+  use = "complete.obs"
+)
+
+n_specialization_hhi_complete <- sum(
+  !is.na(panel_value_ext$specialization_share) & !is.na(panel_value_ext$hhi_cpv)
+)
+
+message(
+  "Correlation between specialization_share and hhi_cpv (value extended sample): ",
+  round(specialization_hhi_cor, 4),
+  " (n = ", n_specialization_hhi_complete, ")"
+)
+
+specialization_hhi_collinearity_check <- tibble::tibble(
+  metric = c(
+    "cor_specialization_share_hhi_cpv",
+    "n_complete_obs",
+    "sample_used"
+  ),
+  value = c(
+    as.character(specialization_hhi_cor),
+    as.character(n_specialization_hhi_complete),
+    "panel_value_ext"
+  )
+)
+
+readr::write_csv(
+  specialization_hhi_collinearity_check,
+  here::here("output", "tables", "specialization_hhi_collinearity_check.csv")
+)
+
+message("Specialization-share / HHI collinearity check saved.")
+
+# -----------------------------------------------------------
 # 8) Regression models
 # -----------------------------------------------------------
+# is_consortium is included in every specification below, including A2-A5
+# and B2-B6 with country_fe. It was previously hand-omitted from those
+# models based on an untested near-perfect-collinearity assumption; the
+# Section 7b diagnostic shows that assumption does not hold in this sample,
+# so it is retained throughout.
 modA1 <- fixest::feols(
   log_awards_count ~
     z_distinct_buyers +
@@ -299,7 +511,8 @@ modA2 <- fixest::feols(
     z_distinct_buyer_countries +
     z_cross_border_share +
     z_hhi_cpv +
-    z_years_active | year_fe + country_fe,
+    z_years_active +
+    is_consortium | year_fe + country_fe,
   cluster = ~ WIN_NAME_CLEAN,
   data = panel_count_base
 )
@@ -310,7 +523,8 @@ modB2 <- fixest::feols(
     z_distinct_buyer_countries +
     z_cross_border_share +
     z_hhi_cpv +
-    z_years_active | year_fe + country_fe,
+    z_years_active +
+    is_consortium | year_fe + country_fe,
   cluster = ~ WIN_NAME_CLEAN,
   data = panel_value_base
 )
@@ -321,7 +535,8 @@ modA2m <- fixest::feols(
     z_distinct_buyer_countries +
     z_cross_border_share +
     z_hhi_cpv +
-    z_years_active | year_fe + country_fe,
+    z_years_active +
+    is_consortium | year_fe + country_fe,
   cluster = ~ WIN_NAME_CLEAN,
   data = panel_count_ext
 )
@@ -332,7 +547,8 @@ modB2m <- fixest::feols(
     z_distinct_buyer_countries +
     z_cross_border_share +
     z_hhi_cpv +
-    z_years_active | year_fe + country_fe,
+    z_years_active +
+    is_consortium | year_fe + country_fe,
   cluster = ~ WIN_NAME_CLEAN,
   data = panel_value_ext
 )
@@ -344,6 +560,7 @@ modA3 <- fixest::feols(
     z_cross_border_share +
     z_hhi_cpv +
     z_years_active +
+    is_consortium +
     z_price_criteria_share | year_fe + country_fe,
   cluster = ~ WIN_NAME_CLEAN,
   data = panel_count_ext
@@ -356,6 +573,7 @@ modB3 <- fixest::feols(
     z_cross_border_share +
     z_hhi_cpv +
     z_years_active +
+    is_consortium +
     z_price_criteria_share | year_fe + country_fe,
   cluster = ~ WIN_NAME_CLEAN,
   data = panel_value_ext
@@ -368,6 +586,7 @@ modA4 <- fixest::feols(
     z_cross_border_share +
     z_hhi_cpv +
     z_years_active +
+    is_consortium +
     z_price_criteria_share | year_fe + country_fe + proc_fe,
   cluster = ~ WIN_NAME_CLEAN,
   data = panel_count_ext
@@ -380,6 +599,7 @@ modB4 <- fixest::feols(
     z_cross_border_share +
     z_hhi_cpv +
     z_years_active +
+    is_consortium +
     z_price_criteria_share | year_fe + country_fe + proc_fe,
   cluster = ~ WIN_NAME_CLEAN,
   data = panel_value_ext
@@ -392,6 +612,7 @@ modA5 <- fixest::feols(
     z_cross_border_share +
     z_hhi_cpv +
     z_years_active +
+    is_consortium +
     z_price_criteria_share | year_fe + country_fe + proc_fe,
   cluster = ~ WIN_NAME_CLEAN,
   data = panel_count_rob2
@@ -404,6 +625,7 @@ modB5 <- fixest::feols(
     z_cross_border_share +
     z_hhi_cpv +
     z_years_active +
+    is_consortium +
     z_price_criteria_share | year_fe + country_fe + proc_fe,
   cluster = ~ WIN_NAME_CLEAN,
   data = panel_value_rob2
@@ -416,10 +638,37 @@ modB6 <- fixest::feols(
     z_cross_border_share +
     z_hhi_cpv +
     z_years_active +
+    is_consortium +
     z_price_criteria_share | year_fe + country_fe + proc_fe,
   cluster = ~ WIN_NAME_CLEAN,
   data = panel_value_trim
 )
+
+# -----------------------------------------------------------
+# 8b) Within-R2 support for modelsummary
+# -----------------------------------------------------------
+# modelsummary builds its goodness-of-fit rows from whatever broom::glance()
+# returns for the model class, and silently drops any gof_map entry whose
+# `raw` name is absent. For fixest objects, broom::glance() does not expose
+# a within-R2 column, so the "Within R2" row never reached the exported CSVs
+# even though gof_map requested it.
+#
+# glance_custom() is the documented modelsummary extension point: whatever it
+# returns is appended to the standard glance output. Here it adds a
+# `within.r2` column computed directly by fixest::r2(x, "wr2"), which the
+# gof_map entries below then rename to "Within R2".
+#
+# tryCatch guards models for which the within-R2 is undefined; those cells are
+# left blank rather than aborting the export.
+
+glance_custom.fixest <- function(x, ...) {
+  data.frame(
+    within.r2 = tryCatch(
+      unname(fixest::r2(x, "wr2")),
+      error = function(e) NA_real_
+    )
+  )
+}
 
 # -----------------------------------------------------------
 # 9) Save regression tables
@@ -438,7 +687,7 @@ gof_map_common <- tibble::tribble(
   ~raw, ~clean, ~fmt,
   "nobs", "N", 0,
   "adj.r.squared", "Adj. R2", 3,
-  "within.r.squared", "Within R2", 3,
+  "within.r2", "Within R2", 3,
   "rmse", "RMSE", 3
 )
 
@@ -491,7 +740,7 @@ gof_map_inc <- tibble::tribble(
   ~raw, ~clean, ~fmt,
   "nobs", "N", 0,
   "adj.r.squared", "Adj. R2", 3,
-  "within.r.squared", "Within R2", 3,
+  "within.r2", "Within R2", 3,
   "rmse", "RMSE", 3
 )
 

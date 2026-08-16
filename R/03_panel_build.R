@@ -284,7 +284,67 @@ message(
 )
 
 # -----------------------------------------------------------
-# 8) Supplier-year aggregation
+# 8) CRIT_CODE by-year validation output
+#    (replaces the orphaned crit_code_by_year.csv /
+#    crit_code_frequency.csv, which were not produced by any
+#    script and were 10 rows out of step with the deduplicated
+#    awards table used everywhere else. This block is derived
+#    from the same `awards` object as crit_code_validation
+#    above, so the Overall row and the by-year rows can never
+#    disagree again.)
+# -----------------------------------------------------------
+message("Building CRIT_CODE by-year validation table ...")
+
+crit_code_by_year_validation <- awards %>%
+  dplyr::mutate(
+    crit_group = dplyr::case_when(
+      is.na(CRIT_CODE) ~ "Missing",
+      CRIT_CODE == "L" ~ "Lowest price",
+      CRIT_CODE == "M" ~ "Most economically advantageous tender",
+      TRUE ~ "Other / unexpected code"
+    )
+  ) %>%
+  dplyr::count(award_year, CRIT_CODE, crit_group, name = "n") %>%
+  dplyr::group_by(award_year) %>%
+  dplyr::mutate(share_within_year = n / sum(n)) %>%
+  dplyr::ungroup() %>%
+  dplyr::arrange(award_year, dplyr::desc(n), CRIT_CODE)
+
+crit_code_by_year_file <- here::here("logs", "crit_code_by_year_validation.csv")
+readr::write_csv(crit_code_by_year_validation, crit_code_by_year_file)
+
+message("CRIT_CODE by-year validation saved to: ", crit_code_by_year_file)
+
+# -----------------------------------------------------------
+# 9) CRIT_CODE by-procedure validation output
+#    (replaces the orphaned crit_code_by_procedure.csv, same
+#    stale-generation issue as above: not produced by any
+#    script and summing to the pre-dedup row count.)
+# -----------------------------------------------------------
+message("Building CRIT_CODE by-procedure validation table ...")
+
+crit_code_by_procedure_validation <- awards %>%
+  dplyr::mutate(
+    crit_group = dplyr::case_when(
+      is.na(CRIT_CODE) ~ "Missing",
+      CRIT_CODE == "L" ~ "Lowest price",
+      CRIT_CODE == "M" ~ "Most economically advantageous tender",
+      TRUE ~ "Other / unexpected code"
+    )
+  ) %>%
+  dplyr::count(TOP_TYPE, CRIT_CODE, crit_group, name = "n") %>%
+  dplyr::group_by(TOP_TYPE) %>%
+  dplyr::mutate(share_within_proc = n / sum(n)) %>%
+  dplyr::ungroup() %>%
+  dplyr::arrange(TOP_TYPE, dplyr::desc(n), CRIT_CODE)
+
+crit_code_by_procedure_file <- here::here("logs", "crit_code_by_procedure_validation.csv")
+readr::write_csv(crit_code_by_procedure_validation, crit_code_by_procedure_file)
+
+message("CRIT_CODE by-procedure validation saved to: ", crit_code_by_procedure_file)
+
+# -----------------------------------------------------------
+# 10) Supplier-year aggregation
 # -----------------------------------------------------------
 message("Aggregating to supplier-year level ...")
 
@@ -357,7 +417,7 @@ message(
 )
 
 # -----------------------------------------------------------
-# 9) Longitudinal variables
+# 11) Longitudinal variables
 # -----------------------------------------------------------
 panel <- panel %>%
   dplyr::group_by(WIN_NAME_CLEAN) %>%
@@ -371,7 +431,7 @@ panel <- panel %>%
   dplyr::ungroup()
 
 # -----------------------------------------------------------
-# 10) Log transformations
+# 12) Log transformations
 # -----------------------------------------------------------
 panel <- panel %>%
   dplyr::mutate(
@@ -381,7 +441,7 @@ panel <- panel %>%
   )
 
 # -----------------------------------------------------------
-# 11) Save panel output
+# 13) Save panel output
 # -----------------------------------------------------------
 output_file <- here::here("data", "processed", "supplier_year_panel.csv")
 readr::write_csv(panel, output_file)
@@ -389,7 +449,7 @@ readr::write_csv(panel, output_file)
 message("Saved supplier-year panel to: ", output_file)
 
 # -----------------------------------------------------------
-# 12) Save panel log
+# 14) Save panel log
 # -----------------------------------------------------------
 panel_log <- tibble::tibble(
   metric = c(
